@@ -1,0 +1,135 @@
+{
+    "version": "1.0.0",
+    "lastUpdated": "2024-01-15T10:00:00.000Z",
+    "description": "feRouter Gateway 路由配置文件",
+    "routes": [
+        {
+            "id": "home-page",
+            "name": "首页",
+            "path": "/",
+            "method": [
+                "GET"
+            ],
+            "ossPath": "pages/home/index.html",
+            "bucket": "static-web",
+            "priority": 100,
+            "enabled": true,
+            "cacheConfig": {
+                "enabled": true,
+                "ttl": 600,
+                "varyBy": [
+                    "host"
+                ]
+            },
+            "headers": {
+                "X-Page-Type": "home",
+                "Cache-Control": "public, max-age=3600"
+            },
+            "conditions": {
+                "domain": "www.example.com"
+            },
+            "description": "网站首页"
+        },
+        {
+            "id": "about-page",
+            "name": "关于页面",
+            "path": "/about",
+            "method": [
+                "GET"
+            ],
+            "ossPath": "pages/about/index.html",
+            "bucket": "static-web",
+            "priority": 90,
+            "enabled": true,
+            "cacheConfig": {
+                "enabled": true,
+                "ttl": 300
+            },
+            "headers": {
+                "X-Page-Type": "about"
+            },
+            "description": "关于我们页面"
+        },
+        {
+            "id": "docs-wildcard",
+            "name": "文档页面",
+            "path": "/docs/*",
+            "method": [
+                "GET"
+            ],
+            "ossPath": "docs/{{path}}.html",
+            "bucket": "documentation",
+            "priority": 80,
+            "enabled": true,
+            "cacheConfig": {
+                "enabled": true,
+                "ttl": 1800
+            },
+            "headers": {
+                "X-Page-Type": "documentation"
+            },
+            "conditions": {
+                "domain": [
+                    "docs.example.com",
+                    "help.example.com"
+                ]
+            },
+            "description": "文档页面通配符路由"
+        },
+        {
+            "id": "mobile-home",
+            "name": "移动端首页",
+            "path": "/",
+            "method": [
+                "GET"
+            ],
+            "ossPath": "mobile/pages/home/index.html",
+            "bucket": "mobile-web",
+            "priority": 95,
+            "enabled": true,
+            "cacheConfig": {
+                "enabled": true,
+                "ttl": 600
+            },
+            "headers": {
+                "X-Page-Type": "mobile-home",
+                "X-Device-Type": "mobile"
+            },
+            "conditions": {
+                "domain": "m.example.com",
+                "userAgent": "Mobile"
+            },
+            "description": "移动端首页，基于域名和User-Agent匹配"
+        }
+    ],
+    "errorPages": {
+        "404": {
+            "bucket": "static-web",
+            "ossPath": "errors/404.html",
+            "headers": {
+                "X-Error-Type": "not-found"
+            }
+        },
+        "500": {
+            "bucket": "static-web",
+            "ossPath": "errors/500.html",
+            "headers": {
+                "X-Error-Type": "server-error"
+            }
+        },
+        "503": {
+            "bucket": "static-web",
+            "ossPath": "errors/maintenance.html",
+            "headers": {
+                "X-Error-Type": "maintenance"
+            }
+        }
+    },
+    "globalSettings": {
+        "defaultCacheTime": 300,
+        "maxRedirects": 5,
+        "timeout": 10000,
+        "retries": 3,
+        "compression": true
+    }
+}

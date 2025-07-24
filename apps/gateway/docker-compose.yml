@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  gateway:
+    build: .
+    container_name: fe-router-gateway
+    ports:
+      - '3000:3000'
+    environment:
+      - NODE_ENV=production
+      - REDIS_HOST=redis
+      - LOG_LEVEL=info
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3000/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - gateway-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: fe-router-redis
+    ports:
+      - '6379:6379'
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - gateway-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: fe-router-nginx
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - gateway
+    restart: unless-stopped
+    networks:
+      - gateway-network
+
+  # 可选：Redis 管理界面
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: fe-router-redis-ui
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+      - HTTP_USER=admin
+      - HTTP_PASSWORD=admin123
+    ports:
+      - '8081:8081'
+    depends_on:
+      - redis
+    networks:
+      - gateway-network
+    profiles:
+      - debug
+
+volumes:
+  redis_data:
+    driver: local
+
+networks:
+  gateway-network:
+    driver: bridge
