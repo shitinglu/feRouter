@@ -1,0 +1,305 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+ 
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ===== 应用管理模块 =====
+
+// 应用信息表
+model Application {
+  id          String            @id @default(cuid())
+  name        String            // 应用名称
+  code        String            @unique // 应用唯一标识码
+  domain      String            @unique // 绑定域名
+  description String?           // 应用描述
+  status      ApplicationStatus @default(ACTIVE) // 应用状态
+  
+  // 关联关系
+  routes      RouteConfig[]     // 路由配置
+  permissions AppPermission[]   // 应用权限
+  versions    ConfigVersion[]   // 配置版本
+  auditLogs   AuditLog[]        // 审计日志
+  
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  createdBy   String?           // 创建者ID
+  
+  @@map("applications")
+}
+
+enum ApplicationStatus {
+  ACTIVE      // 活跃
+  INACTIVE    // 停用
+  MAINTENANCE // 维护中
+}
+
+// ===== 路由配置模块 =====
+
+// 路由配置主表
+model RouteConfig {
+  id            String          @id @default(cuid())
+  applicationId String          // 应用ID
+  name          String          // 配置名称
+  path          String          // 路由路径
+  method        HttpMethod      @default(GET) // HTTP方法
+  configType    ConfigType      // 配置类型
+  priority      Int             @default(0) // 优先级
+  status        RouteStatus     @default(ACTIVE) // 状态
+  
+  // 配置详情（根据configType决定使用哪个）
+  redirectConfig RedirectConfig? // 重定向配置
+  ossConfig      OssConfig?      // OSS映射配置
+  
+  // 关联关系
+  application   Application     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  versions      ConfigVersion[] // 版本记录
+  
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  createdBy     String?         // 创建者ID
+  
+  @@unique([applicationId, path, method]) // 同应用下路径+方法唯一
+  @@map("route_configs")
+}
+
+// 重定向配置表
+model RedirectConfig {
+  id           String      @id @default(cuid())
+  routeId      String      @unique // 路由配置ID
+  targetUrl    String      // 目标URL
+  statusCode   Int         @default(302) // HTTP状态码
+  queryForward Boolean     @default(true) // 是否转发查询参数
+  headers      Json?       // 自定义响应头
+  
+  route        RouteConfig @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  
+  @@map("redirect_configs")
+}
+
+// OSS映射配置表
+model OssConfig {
+  id            String      @id @default(cuid())
+  routeId       String      @unique // 路由配置ID
+  bucket        String      // OSS存储桶
+  objectKey     String      // 对象键（文件路径）
+  region        String?     // 区域
+  endpoint      String?     // 自定义端点
+  cacheControl  String?     // 缓存控制
+  contentType   String?     // 内容类型
+  headers       Json?       // 自定义响应头
+  
+  route         RouteConfig @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  
+  @@map("oss_configs")
+}
+
+enum ConfigType {
+  REDIRECT // 重定向
+  OSS      // OSS映射
+}
+
+enum RouteStatus {
+  ACTIVE   // 活跃
+  INACTIVE // 停用
+  TESTING  // 测试中
+}
+
+enum HttpMethod {
+  GET
+  POST
+  PUT
+  DELETE
+  PATCH
+  HEAD
+  OPTIONS
+  ALL      // 匹配所有方法
+}
+
+// ===== 权限管理模块 =====
+
+
+
+// 应用权限表
+model AppPermission {
+  id            String            @id @default(cuid())
+  userId        String            // 用户ID
+  applicationId String            // 应用ID
+  role          AppRole           // 角色
+  permissions   PermissionType[]  // 权限列表
+  
+  // 关联关系
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application   Application       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  grantedBy     String?           // 授权者ID
+  
+  @@unique([userId, applicationId]) // 用户在每个应用下只能有一个权限记录
+  @@map("app_permissions")
+}
+
+enum AppRole {
+  OWNER    // 拥有者
+  ADMIN    // 管理员
+  EDITOR   // 编辑者
+  VIEWER   // 查看者
+}
+
+enum PermissionType {
+  READ     // 读取
+  WRITE    // 写入
+  DELETE   // 删除
+  DEPLOY   // 部署
+  ROLLBACK // 回滚
+  MANAGE   // 管理权限
+}
+
+// ===== 版本控制模块 =====
+
+// 配置版本表
+model ConfigVersion {
+  id            String        @id @default(cuid())
+  applicationId String        // 应用ID
+  routeId       String?       // 路由配置ID（为空表示应用级版本）
+  version       String        // 版本号
+  action        VersionAction // 操作类型
+  description   String?       // 版本描述
+  configData    Json          // 配置数据快照
+  
+  // 关联关系
+  application   Application   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  route         RouteConfig?  @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  
+  createdAt     DateTime      @default(now())
+  createdBy     String        // 操作者ID
+  
+  @@map("config_versions")
+}
+
+// 操作日志表
+model AuditLog {
+  id            String        @id @default(cuid())
+  userId        String        // 操作用户ID
+  applicationId String        // 应用ID
+  action        String        // 操作类型
+  resource      String        // 操作资源
+  resourceId    String        // 资源ID
+  details       Json?         // 操作详情
+  ipAddress     String?       // IP地址
+  userAgent     String?       // 用户代理
+  
+  // 关联关系
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application   Application   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  createdAt     DateTime      @default(now())
+  
+  @@map("audit_logs")
+}
+
+enum VersionAction {
+  CREATE   // 创建
+  UPDATE   // 更新
+  DELETE   // 删除
+  ROLLBACK // 回滚
+  DEPLOY   // 部署
+}
+
+
+
+// ===== NextAuth相关表（保持不变）=====
+
+// 用户表（更新现有User表）
+model User {
+  id            String          @id @default(cuid())
+  name          String?
+  email         String          @unique
+  emailVerified DateTime?       @map("email_verified")
+  image         String?
+  accounts      Account[]
+  sessions      Session[]
+
+  
+  // Optional for WebAuthn support
+  Authenticator Authenticator[]
+  
+  // 新增权限关联
+  appPermissions AppPermission[]
+  auditLogs      AuditLog[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+// model User {
+//   id            String    @id @default(cuid())
+//   name          String?
+//   email         String?   @unique
+//   emailVerified DateTime? @map("email_verified")
+//   image         String?
+//   accounts      Account[]
+//   sessions      Session[]
+ 
+//   @@map("users")
+// }
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+ 
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+ 
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+ 
+  @@id([provider, providerAccountId])
+}
+ 
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+ 
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+ 
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+ 
+  @@id([identifier, token])
+}
+ 
+// Optional for WebAuthn support
+model Authenticator {
+  credentialID         String  @unique
+  userId               String
+  providerAccountId    String
+  credentialPublicKey  String
+  counter              Int
+  credentialDeviceType String
+  credentialBackedUp   Boolean
+  transports           String?
+ 
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+ 
+  @@id([userId, credentialID])
+}
