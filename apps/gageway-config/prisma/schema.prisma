@@ -2,7 +2,7 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
- 
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -12,100 +12,152 @@ generator client {
 // 应用信息表
 model Application {
   id          String            @id @default(cuid())
-  name        String            // 应用名称
+  name        String // 应用名称
   code        String            @unique // 应用唯一标识码
   domain      String            @unique // 绑定域名
-  description String?           // 应用描述
+  description String? // 应用描述
   status      ApplicationStatus @default(ACTIVE) // 应用状态
-  
+
   // 关联关系
-  routes      RouteConfig[]     // 路由配置
-  permissions AppPermission[]   // 应用权限
-  versions    ConfigVersion[]   // 配置版本
-  auditLogs   AuditLog[]        // 审计日志
-  
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  createdBy   String?           // 创建者ID
-  
+  routes      Route[] // 路由配置
+  permissions AppPermission[] // 应用权限
+  versions    ConfigVersion[] // 配置版本
+  auditLogs   AuditLog[] // 审计日志
+  analytics   RouteAnalytics[] // 路由访问统计
+  stats       ApplicationStats[] // 应用访问统计
+  popularPaths PopularPaths[] // 热门路径统计
+  systemMetrics SystemMetrics[] // 系统性能指标
+  errorLogs   ErrorLog[] // 错误日志
+  performanceAlerts PerformanceAlert[] // 性能警报
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String? // 创建者ID
+
   @@map("applications")
 }
 
 enum ApplicationStatus {
-  ACTIVE      // 活跃
-  INACTIVE    // 停用
+  ACTIVE // 活跃
+  INACTIVE // 停用
   MAINTENANCE // 维护中
 }
 
 // ===== 路由配置模块 =====
 
-// 路由配置主表
-model RouteConfig {
-  id            String          @id @default(cuid())
-  applicationId String          // 应用ID
-  name          String          // 配置名称
-  path          String          // 路由路径
-  method        HttpMethod      @default(GET) // HTTP方法
-  configType    ConfigType      // 配置类型
-  priority      Int             @default(0) // 优先级
-  status        RouteStatus     @default(ACTIVE) // 状态
-  
-  // 配置详情（根据configType决定使用哪个）
-  redirectConfig RedirectConfig? // 重定向配置
-  ossConfig      OssConfig?      // OSS映射配置
-  
+// 路由主表 - 每个路由路径一条记录
+model Route {
+  id            String     @id @default(cuid())
+  applicationId String // 应用ID
+  name          String // 路由名称
+  path          String // 路由路径
+  method        HttpMethod @default(GET) // HTTP方法
+  priority      Int        @default(0) // 优先级
+  status        RouteMainStatus @default(INACTIVE) // 路由级别状态：控制整个路由是否生效
+
+  // 当前发布的版本 - 添加 @unique 使其成为真正的一对一关系
+  publishedVersionId String?       @unique // 当前发布的版本ID
+  publishedVersion   RouteVersion? @relation("PublishedVersion", fields: [publishedVersionId], references: [id])
+
   // 关联关系
-  application   Application     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  versions      ConfigVersion[] // 版本记录
-  
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-  createdBy     String?         // 创建者ID
-  
-  @@unique([applicationId, path, method]) // 同应用下路径+方法唯一
-  @@map("route_configs")
+  application    Application     @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  versions       RouteVersion[]  @relation("RouteVersions")
+  configVersions ConfigVersion[] // 添加这个反向关系字段
+  analytics      RouteAnalytics[] // 路由访问统计
+  errorLogs      ErrorLog[] // 错误日志
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String? // 创建者ID
+
+  @@unique([applicationId, path, method])
+  @@map("routes")
+}
+
+// 新增路由主状态枚举
+enum RouteMainStatus {
+  ACTIVE   // 路由生效
+  INACTIVE // 路由停用
+}
+
+// 路由版本表 - 每个版本一条记录
+model RouteVersion {
+  id      String @id @default(cuid())
+  routeId String // 路由ID
+  version String // 版本号
+
+  // 配置信息
+  configType ConfigType // 配置类型
+  status     RouteStatus @default(DRAFT) // 版本状态
+
+  // 版本关系
+  baseVersionId   String? // 基于哪个版本创建
+  baseVersion     RouteVersion?  @relation("VersionHistory", fields: [baseVersionId], references: [id])
+  derivedVersions RouteVersion[] @relation("VersionHistory")
+
+  // 发布相关
+  publishedAt DateTime? // 发布时间
+  publishedBy String? // 发布者ID
+
+  // 配置详情
+  redirectConfig RedirectConfig?
+  ossConfig      OssConfig?
+
+  // 关联关系
+  route            Route           @relation("RouteVersions", fields: [routeId], references: [id], onDelete: Cascade)
+  publishedByRoute Route?          @relation("PublishedVersion") // 被哪个路由作为发布版本
+  configVersions   ConfigVersion[] // 添加这个反向关系字段
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBy String? // 创建者ID
+
+  @@unique([routeId, version])
+  @@map("route_versions")
 }
 
 // 重定向配置表
 model RedirectConfig {
-  id           String      @id @default(cuid())
-  routeId      String      @unique // 路由配置ID
-  targetUrl    String      // 目标URL
-  statusCode   Int         @default(302) // HTTP状态码
-  queryForward Boolean     @default(true) // 是否转发查询参数
-  headers      Json?       // 自定义响应头
-  
-  route        RouteConfig @relation(fields: [routeId], references: [id], onDelete: Cascade)
-  
+  id           String  @id @default(cuid())
+  versionId    String  @unique // 路由版本ID
+  targetUrl    String // 目标URL
+  statusCode   Int     @default(302) // HTTP状态码
+  queryForward Boolean @default(true) // 是否转发查询参数
+  headers      Json? // 自定义响应头
+
+  version RouteVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
   @@map("redirect_configs")
 }
 
 // OSS映射配置表
 model OssConfig {
-  id            String      @id @default(cuid())
-  routeId       String      @unique // 路由配置ID
-  bucket        String      // OSS存储桶
-  objectKey     String      // 对象键（文件路径）
-  region        String?     // 区域
-  endpoint      String?     // 自定义端点
-  cacheControl  String?     // 缓存控制
-  contentType   String?     // 内容类型
-  headers       Json?       // 自定义响应头
-  
-  route         RouteConfig @relation(fields: [routeId], references: [id], onDelete: Cascade)
-  
+  id           String  @id @default(cuid())
+  versionId    String  @unique // 路由版本ID
+  bucket       String // OSS存储桶
+  objectKey    String // 对象键（文件路径）
+  region       String? // 区域
+  endpoint     String? // 自定义端点
+  cacheControl String? // 缓存控制
+  contentType  String? // 内容类型
+  headers      Json? // 自定义响应头
+
+  version RouteVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
   @@map("oss_configs")
 }
 
 enum ConfigType {
   REDIRECT // 重定向
-  OSS      // OSS映射
+  OSS // OSS映射
 }
 
+// 路由状态枚举需要增加草稿状态
 enum RouteStatus {
-  ACTIVE   // 活跃
+  DRAFT // 草稿状态
+  ACTIVE // 活跃（已发布）
   INACTIVE // 停用
-  TESTING  // 测试中
+  TESTING // 测试中
 }
 
 enum HttpMethod {
@@ -116,47 +168,45 @@ enum HttpMethod {
   PATCH
   HEAD
   OPTIONS
-  ALL      // 匹配所有方法
+  ALL // 匹配所有方法
 }
 
 // ===== 权限管理模块 =====
 
-
-
 // 应用权限表
 model AppPermission {
-  id            String            @id @default(cuid())
-  userId        String            // 用户ID
-  applicationId String            // 应用ID
-  role          AppRole           // 角色
-  permissions   PermissionType[]  // 权限列表
-  
+  id            String           @id @default(cuid())
+  userId        String // 用户ID
+  applicationId String // 应用ID
+  role          AppRole // 角色
+  permissions   PermissionType[] // 权限列表
+
   // 关联关系
-  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  application   Application       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
-  grantedBy     String?           // 授权者ID
-  
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  grantedBy String? // 授权者ID
+
   @@unique([userId, applicationId]) // 用户在每个应用下只能有一个权限记录
   @@map("app_permissions")
 }
 
 enum AppRole {
-  OWNER    // 拥有者
-  ADMIN    // 管理员
-  EDITOR   // 编辑者
-  VIEWER   // 查看者
+  OWNER // 拥有者
+  ADMIN // 管理员
+  EDITOR // 编辑者
+  VIEWER // 查看者
 }
 
 enum PermissionType {
-  READ     // 读取
-  WRITE    // 写入
-  DELETE   // 删除
-  DEPLOY   // 部署
+  READ // 读取
+  WRITE // 写入
+  DELETE // 删除
+  DEPLOY // 部署
   ROLLBACK // 回滚
-  MANAGE   // 管理权限
+  MANAGE // 管理权限
 }
 
 // ===== 版本控制模块 =====
@@ -164,79 +214,81 @@ enum PermissionType {
 // 配置版本表
 model ConfigVersion {
   id            String        @id @default(cuid())
-  applicationId String        // 应用ID
-  routeId       String?       // 路由配置ID（为空表示应用级版本）
-  version       String        // 版本号
+  applicationId String // 应用ID
+  routeId       String? // 路由ID（为空表示应用级版本）
+  versionId     String? // 路由版本ID
+  version       String // 版本号
   action        VersionAction // 操作类型
-  description   String?       // 版本描述
-  configData    Json          // 配置数据快照
-  
+  description   String? // 版本描述
+  configData    Json // 配置数据快照
+
   // 关联关系
-  application   Application   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  route         RouteConfig?  @relation(fields: [routeId], references: [id], onDelete: Cascade)
-  
-  createdAt     DateTime      @default(now())
-  createdBy     String        // 操作者ID
-  
+  application  Application   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  route        Route?        @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  routeVersion RouteVersion? @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  createdBy String // 操作者ID
+
   @@map("config_versions")
 }
 
 // 操作日志表
 model AuditLog {
-  id            String        @id @default(cuid())
-  userId        String        // 操作用户ID
-  applicationId String        // 应用ID
-  action        String        // 操作类型
-  resource      String        // 操作资源
-  resourceId    String        // 资源ID
-  details       Json?         // 操作详情
-  ipAddress     String?       // IP地址
-  userAgent     String?       // 用户代理
-  
+  id            String  @id @default(cuid())
+  userId        String // 操作用户ID
+  applicationId String // 应用ID
+  action        String // 操作类型
+  resource      String // 操作资源
+  resourceId    String // 资源ID
+  details       Json? // 操作详情
+  ipAddress     String? // IP地址
+  userAgent     String? // 用户代理
+
   // 关联关系
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  application   Application   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
-  
-  createdAt     DateTime      @default(now())
-  
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
   @@map("audit_logs")
 }
 
+// 版本操作类型增加更多状态
 enum VersionAction {
-  CREATE   // 创建
-  UPDATE   // 更新
-  DELETE   // 删除
+  CREATE // 创建
+  UPDATE // 更新
+  DELETE // 删除
+  DEPLOY // 部署上线
   ROLLBACK // 回滚
-  DEPLOY   // 部署
+  UNPUBLISH // 下线
 }
-
-
 
 // ===== NextAuth相关表（保持不变）=====
 
 // 用户表（更新现有User表）
 model User {
-  id            String          @id @default(cuid())
+  id            String    @id @default(cuid())
   name          String?
-  email         String          @unique
-  emailVerified DateTime?       @map("email_verified")
+  email         String    @unique
+  emailVerified DateTime? @map("email_verified")
   image         String?
   accounts      Account[]
   sessions      Session[]
 
-  
   // Optional for WebAuthn support
   Authenticator Authenticator[]
-  
+
   // 新增权限关联
   appPermissions AppPermission[]
   auditLogs      AuditLog[]
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("users")
 }
+
 // model User {
 //   id            String    @id @default(cuid())
 //   name          String?
@@ -245,7 +297,7 @@ model User {
 //   image         String?
 //   accounts      Account[]
 //   sessions      Session[]
- 
+
 //   @@map("users")
 // }
 
@@ -261,33 +313,33 @@ model Account {
   scope             String?
   id_token          String?
   session_state     String?
- 
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
- 
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
- 
+
   @@id([provider, providerAccountId])
 }
- 
+
 model Session {
   sessionToken String   @unique
   userId       String
   expires      DateTime
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
- 
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
- 
+
 model VerificationToken {
   identifier String
   token      String
   expires    DateTime
- 
+
   @@id([identifier, token])
 }
- 
+
 // Optional for WebAuthn support
 model Authenticator {
   credentialID         String  @unique
@@ -298,8 +350,292 @@ model Authenticator {
   credentialDeviceType String
   credentialBackedUp   Boolean
   transports           String?
- 
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
- 
+
   @@id([userId, credentialID])
+}
+
+// ===== 数据分析模块 =====
+
+// 路由访问统计表
+model RouteAnalytics {
+  id            String   @id @default(cuid())
+  applicationId String   // 应用ID
+  routeId       String   // 路由ID
+  versionId     String?  // 版本ID
+  
+  // 请求信息
+  method        String   // HTTP方法
+  path          String   // 访问路径
+  statusCode    Int      // 响应状态码
+  responseTime  Float    // 响应时间(ms)
+  
+  // 用户信息
+  userAgent     String?  // 用户代理
+  ip            String?  // 用户IP
+  referer       String?  // 来源页面
+  
+  // 地理位置（可选）
+  country       String?  // 国家
+  city          String?  // 城市
+  
+  // 关联关系
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  route         Route       @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  
+  createdAt     DateTime @default(now())
+  
+  @@index([applicationId, createdAt])
+  @@index([routeId, createdAt])
+  @@index([createdAt])
+  @@map("route_analytics")
+}
+
+// 应用访问统计汇总表（按小时/天汇总）
+model ApplicationStats {
+  id            String   @id @default(cuid())
+  applicationId String   // 应用ID
+  
+  // 统计维度
+  statType      StatType @default(HOURLY) // 统计类型：小时/天/月
+  statTime      DateTime // 统计时间点
+  
+  // 统计数据
+  totalRequests Int      @default(0) // 总请求数
+  uniqueUsers   Int      @default(0) // 独立用户数
+  avgResponseTime Float  @default(0) // 平均响应时间
+  errorRate     Float    @default(0) // 错误率
+  
+  // 状态码统计
+  status2xx     Int      @default(0) // 2xx状态码数量
+  status3xx     Int      @default(0) // 3xx状态码数量
+  status4xx     Int      @default(0) // 4xx状态码数量
+  status5xx     Int      @default(0) // 5xx状态码数量
+  
+  // 关联关系
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@unique([applicationId, statType, statTime])
+  @@index([applicationId, statType, statTime])
+  @@map("application_stats")
+}
+
+enum StatType {
+  HOURLY  // 小时级统计
+  DAILY   // 日级统计
+  MONTHLY // 月级统计
+}
+
+// 热门路径统计表
+model PopularPaths {
+  id            String @id @default(cuid())
+  applicationId String // 应用ID
+  
+  path          String // 路径
+  requestCount  Int    @default(0) // 请求次数
+  uniqueUsers   Int    @default(0) // 独立用户数
+  
+  // 统计时间范围
+  startTime     DateTime
+  endTime       DateTime
+  
+  // 关联关系
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([applicationId, requestCount])
+  @@map("popular_paths")
+}
+
+// ===== 性能监控模块 =====
+
+// 系统性能指标表
+model SystemMetrics {
+  id            String @id @default(cuid())
+  applicationId String // 应用ID
+  
+  // 性能指标
+  cpuUsage      Float    // CPU使用率 (0-100)
+  memoryUsage   Float    // 内存使用率 (0-100)
+  diskUsage     Float    // 磁盘使用率 (0-100)
+  networkIn     Float    // 网络入流量 (MB/s)
+  networkOut    Float    // 网络出流量 (MB/s)
+  
+  // 应用性能指标
+  responseTime  Float    // 平均响应时间 (ms)
+  throughput    Int      // 吞吐量 (requests/minute)
+  errorCount    Int      // 错误数量
+  activeUsers   Int      // 活跃用户数
+  
+  // 数据库性能
+  dbConnections Int      // 数据库连接数
+  dbQueryTime   Float    // 数据库查询时间 (ms)
+  
+  // 关联关系
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  createdAt     DateTime @default(now())
+  
+  @@index([applicationId, createdAt])
+  @@index([createdAt])
+  @@map("system_metrics")
+}
+
+// 错误日志表
+model ErrorLog {
+  id            String    @id @default(cuid())
+  applicationId String    // 应用ID
+  routeId       String?   // 路由ID（可选）
+  
+  // 错误信息
+  errorType     ErrorType // 错误类型
+  severity      ErrorSeverity @default(MEDIUM) // 严重程度
+  message       String    // 错误消息
+  stackTrace    String?   // 堆栈跟踪
+  errorCode     String?   // 错误代码
+  
+  // 请求信息
+  method        String?   // HTTP方法
+  path          String?   // 请求路径
+  statusCode    Int?      // HTTP状态码
+  userAgent     String?   // 用户代理
+  ip            String?   // 用户IP
+  
+  // 环境信息
+  environment   String?   // 环境标识
+  version       String?   // 应用版本
+  
+  // 上下文信息
+  userId        String?   // 用户ID（如果有）
+  sessionId     String?   // 会话ID
+  requestId     String?   // 请求ID
+  metadata      Json?     // 额外元数据
+  
+  // 处理状态
+  status        ErrorStatus @default(OPEN) // 处理状态
+  assignedTo    String?   // 分配给
+  resolvedAt    DateTime? // 解决时间
+  resolvedBy    String?   // 解决者
+  resolution    String?   // 解决方案
+  
+  // 关联关系
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  route         Route?      @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([applicationId, errorType, createdAt])
+  @@index([severity, status, createdAt])
+  @@index([createdAt])
+  @@map("error_logs")
+}
+
+enum ErrorType {
+  SYSTEM      // 系统错误
+  APPLICATION // 应用错误
+  NETWORK     // 网络错误
+  DATABASE    // 数据库错误
+  SECURITY    // 安全错误
+  VALIDATION  // 验证错误
+  TIMEOUT     // 超时错误
+  GATEWAY     // 网关错误
+}
+
+enum ErrorSeverity {
+  LOW         // 低级
+  MEDIUM      // 中级
+  HIGH        // 高级
+  CRITICAL    // 严重
+}
+
+enum ErrorStatus {
+  OPEN        // 未处理
+  IN_PROGRESS // 处理中
+  RESOLVED    // 已解决
+  CLOSED      // 已关闭
+  IGNORED     // 已忽略
+}
+
+// 性能警报表
+model PerformanceAlert {
+  id            String      @id @default(cuid())
+  applicationId String      // 应用ID
+  
+  // 警报信息
+  alertType     AlertType   // 警报类型
+  severity      AlertSeverity @default(WARNING) // 严重程度
+  title         String      // 警报标题
+  description   String      // 警报描述
+  threshold     Float?      // 阈值
+  currentValue  Float?      // 当前值
+  
+  // 触发条件
+  metricName    String      // 指标名称
+  condition     AlertCondition // 条件（大于、小于等）
+  duration      Int?        // 持续时间（分钟）
+  
+  // 状态管理
+  status        AlertStatus @default(ACTIVE) // 警报状态
+  acknowledgedAt DateTime? // 确认时间
+  acknowledgedBy String?   // 确认者
+  resolvedAt    DateTime?  // 解决时间
+  resolvedBy    String?    // 解决者
+  
+  // 通知信息
+  notificationSent Boolean @default(false) // 是否已发送通知
+  notificationCount Int   @default(0)      // 通知次数
+  lastNotificationAt DateTime? // 最后通知时间
+  
+  // 关联关系
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([applicationId, status, createdAt])
+  @@index([severity, status, createdAt])
+  @@index([createdAt])
+  @@map("performance_alerts")
+}
+
+enum AlertType {
+  CPU_HIGH       // CPU使用率过高
+  MEMORY_HIGH    // 内存使用率过高
+  DISK_HIGH      // 磁盘使用率过高
+  RESPONSE_SLOW  // 响应时间过慢
+  ERROR_RATE_HIGH // 错误率过高
+  THROUGHPUT_LOW // 吞吐量过低
+  DB_SLOW        // 数据库查询慢
+  NETWORK_HIGH   // 网络流量过高
+  UPTIME_LOW     // 可用性过低
+}
+
+enum AlertSeverity {
+  INFO      // 信息
+  WARNING   // 警告
+  ERROR     // 错误
+  CRITICAL  // 严重
+}
+
+enum AlertCondition {
+  GREATER_THAN    // 大于
+  LESS_THAN       // 小于
+  EQUALS          // 等于
+  NOT_EQUALS      // 不等于
+  GREATER_EQUAL   // 大于等于
+  LESS_EQUAL      // 小于等于
+}
+
+enum AlertStatus {
+  ACTIVE          // 活跃
+  ACKNOWLEDGED    // 已确认
+  RESOLVED        // 已解决
+  SUPPRESSED      // 已抑制
 }

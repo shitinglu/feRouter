@@ -13,12 +13,14 @@ interface AppLayoutProps {
 
 export default async function AppLayout({ children, params }: AppLayoutProps) {
   const session = await auth()
+
+  const { appId } = await params;
   
   if (!session?.user?.id) {
     notFound()
   }
 
-  const application = await getApplicationById(params.appId, session.user.id)
+  const application = await getApplicationById(appId, session.user.id)
   
   if (!application) {
     notFound()
@@ -28,7 +30,7 @@ export default async function AppLayout({ children, params }: AppLayoutProps) {
     <AppProvider application={application}>
       <SidebarProvider>
         <AppSidebar application={application} />
-        <SidebarInset>
+        <SidebarInset  >
           {children}
         </SidebarInset>
         <Toaster position="top-center" />

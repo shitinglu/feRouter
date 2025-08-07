@@ -52,23 +52,23 @@ const menuItems = [
     url: '/routes',
     icon: Route,
     description: '管理应用路由配置',
-    items: [
-      {
-        title: '路由列表',
-        url: '/routes',
-        description: '查看所有路由配置'
-      },
-      {
-        title: '添加路由',
-        url: '/routes/new',
-        description: '创建新的路由配置'
-      },
-      {
-        title: '路由测试',
-        url: '/routes/test',
-        description: '测试路由配置'
-      },
-    ],
+    // items: [
+    //   {
+    //     title: '路由列表',
+    //     url: '/routes',
+    //     description: '查看所有路由配置'
+    //   },
+    //   {
+    //     title: '添加路由',
+    //     url: '/routes/new',
+    //     description: '创建新的路由配置'
+    //   },
+    //   {
+    //     title: '路由测试',
+    //     url: '/routes/test',
+    //     description: '测试路由配置'
+    //   },
+    // ],
   },
   {
     title: '权限管理',
@@ -88,29 +88,29 @@ const menuItems = [
       },
     ],
   },
-  {
-    title: '部署管理',
-    url: '/deployments',
-    icon: History,
-    description: '管理应用部署',
-    items: [
-      {
-        title: '部署历史',
-        url: '/deployments',
-        description: '查看部署历史记录'
-      },
-      {
-        title: '版本管理',
-        url: '/deployments/versions',
-        description: '管理应用版本'
-      },
-      {
-        title: '回滚操作',
-        url: '/deployments/rollback',
-        description: '回滚到指定版本'
-      },
-    ],
-  },
+  // {
+  //   title: '部署管理',
+  //   url: '/deployments',
+  //   icon: History,
+  //   description: '管理应用部署',
+  //   items: [
+  //     {
+  //       title: '部署历史',
+  //       url: '/deployments',
+  //       description: '查看部署历史记录'
+  //     },
+  //     {
+  //       title: '版本管理',
+  //       url: '/deployments/versions',
+  //       description: '管理应用版本'
+  //     },
+  //     {
+  //       title: '回滚操作',
+  //       url: '/deployments/rollback',
+  //       description: '回滚到指定版本'
+  //     },
+  //   ],
+  // },
   {
     title: '数据分析',
     url: '/analytics',
